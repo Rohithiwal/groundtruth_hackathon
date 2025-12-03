@@ -62,7 +62,8 @@ def setup_rag_pipeline():
     chunks = splitter.split_documents(docs)
 
     # FAST, FREE embeddings
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
 
     vectorstore = FAISS.from_documents(chunks, embeddings)
     retriever = vectorstore.as_retriever()
