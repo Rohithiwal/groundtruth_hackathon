@@ -99,8 +99,7 @@ INSTRUCTIONS:
         ("user", "{input}")
     ])
 
-    llama_model = "llama3-70b-8192"   
-
+    llama_model = "gemma2-9b-it", 
     llm = ChatGroq(
     model=llama_model,
     groq_api_key=os.getenv("GROQ_API_KEY"),
