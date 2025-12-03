@@ -1,7 +1,10 @@
-streamlit 
-langchain 
-langchain-community 
-langchain-openai 
-faiss-cpu 
-pypdf 
+streamlit
+langchain
+langchain-community
+langchain-google-genai
+faiss-cpu
+pypdf
 python-dotenv
+langchain-text-splitters
+reportlab
+transformers
