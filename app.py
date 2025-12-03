@@ -99,11 +99,14 @@ INSTRUCTIONS:
         ("user", "{input}")
     ])
 
-    # -------- GROQ LLAMA 3.1 MODEL (FAST + FREE) ----------
+    llama_model = "llama3-70b-8192"   
+
     llm = ChatGroq(
-        model="llama-3.1-70b-versatile",
-        api_key=os.getenv("GROQ_API_KEY")
+    model=llama_model,
+    groq_api_key=os.getenv("GROQ_API_KEY"),
+    temperature=0.3
     )
+
 
     chain = create_stuff_documents_chain(llm, prompt)
     rag_chain = create_retrieval_chain(retriever, chain)
