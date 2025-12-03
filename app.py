@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 # --- GROQ MODEL IMPORTS ---
-from langchain_community.llms import Groq
+from langchain_groq import ChatGroq
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
@@ -100,7 +100,7 @@ INSTRUCTIONS:
     ])
 
     # -------- GROQ LLAMA 3.1 MODEL (FAST + FREE) ----------
-    llm = Groq(
+    llm = ChatGroq(
         model="llama-3.1-70b-versatile",
         api_key=os.getenv("GROQ_API_KEY")
     )
