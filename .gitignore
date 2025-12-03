@@ -1,0 +1,22 @@
+# Secrets (CRITICAL)
+.env
+.streamlit/secrets.toml
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+.env_cache
+
+# Python Bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# VS Code Settings (Optional, keeps personal settings local)
+.vscode/
