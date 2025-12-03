@@ -1,30 +1,28 @@
 import streamlit as st
 import re
 import os
+import time
 from dotenv import load_dotenv
 
-# --- GROQ MODEL IMPORTS ---
-from langchain_groq import ChatGroq
+# --- GOOGLE & LANGCHAIN IMPORTS ---
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# --- LANGCHAIN CLASSIC CHAINS ---
+# --- STANDARD LANGCHAIN IMPORTS ---
+from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-from langchain_classic.chains.retrieval import create_retrieval_chain
 from langchain_core.prompts import ChatPromptTemplate
 
-
-# ----------- LOAD ENV -------------
+# --- 1. CONFIGURATION ---
 load_dotenv()
 
-if not os.getenv("GROQ_API_KEY"):
-    st.error("GROQ_API_KEY missing in .env")
+if not os.getenv("GOOGLE_API_KEY"):
+    st.error("GOOGLE_API_KEY not found in .env file!")
     st.stop()
 
-
-# ---------- USER CONTEXT ----------
+# --- 2. USER CONTEXT ---
 USER_CONTEXT = {
     "user_id": "u_98765",
     "name": "Rohit Yadav",
@@ -38,106 +36,126 @@ USER_CONTEXT = {
         {"item": "Winter Jacket", "date": "2024-12-05", "price": 2200}
     ],
     "loyalty_status": "Gold",
+    "recent_search_keywords": ["thermal wear", "wool socks"]
 }
 
-
-# ----------- MASK PII --------------
+# --- 3. PRIVACY LAYER ---
 def mask_pii(text):
-    text = re.sub(r'\b\d{10}\b', "<PHONE_REDACTED>", text)
-    text = re.sub(r"\b[\w.-]+@[\w.-]+\.\w+\b", "<EMAIL_REDACTED>", text)
+    text = re.sub(r'\b\d{10}\b', '<PHONE_REDACTED>', text)
+    text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '<EMAIL_REDACTED>', text)
     return text
 
-
-# ----------- RAG SETUP ------------
+# --- 4. RAG PIPELINE (v5 - Throttled Google Embeddings) ---
 @st.cache_resource
-def setup_rag_pipeline():
-
+def setup_rag_pipeline_v5():
     if not os.path.exists("store_policy.pdf"):
-        return None, "ERROR: store_policy.pdf missing."
+        return None, "⚠️ Error: 'store_policy.pdf' not found. Run generate_pdf.py!"
 
+    # A. Load & Split Data
     loader = PyPDFLoader("store_policy.pdf")
     docs = loader.load()
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    splits = text_splitter.split_documents(docs)
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = splitter.split_documents(docs)
-
-    # FAST, FREE embeddings
+    # B. Embeddings (Google Paid Model)
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    
+    # --- CRITICAL FIX: BATCH INGESTION ---
+    # We create the vectorstore with the first batch, then add the rest slowly.
+    # This prevents the "429 Rate Limit" error even on paid accounts.
+    batch_size = 10
+    vectorstore = FAISS.from_documents(splits[:batch_size], embeddings)
+    
+    # Process remaining chunks in batches
+    for i in range(batch_size, len(splits), batch_size):
+        time.sleep(1) # Sleep 1s to respect Rate Limits
+        batch = splits[i:i + batch_size]
+        vectorstore.add_documents(batch)
 
-    vectorstore = FAISS.from_documents(chunks, embeddings)
     retriever = vectorstore.as_retriever()
 
-    # -------- SAFE PURCHASE HISTORY ----------
-    history = "\n".join([
-        f"- {p['item']} (Bought: {p['date']}, ₹{p['price']})"
-        for p in USER_CONTEXT["purchase_history"]
-    ])
-    history = history.replace("{", "{{").replace("}", "}}")
+    # --- DATA CLEANING ---
+    history_list = []
+    for h in USER_CONTEXT['purchase_history']:
+        history_list.append(f"- {h['item']} (Bought: {h['date']})")
+    history_str = "\n".join(history_list)
 
-    # -------- SYSTEM PROMPT -----------
-    sys_prompt = f"""
-You are a personalized retail assistant.
+    alerts_str = ", ".join(USER_CONTEXT['current_location']['proximity_alerts'])
 
-USER CONTEXT:
-Name: {USER_CONTEXT['name']}
-Location: {USER_CONTEXT['current_location']['description']}
-Nearby Alerts: {USER_CONTEXT['current_location']['proximity_alerts']}
-Loyalty Tier: {USER_CONTEXT['loyalty_status']}
-Purchase History:
-{history}
-
-INSTRUCTIONS:
-- If user mentions cold/hunger → use location & proximity to suggest options.
-- Gold members get no-questions-asked returns.
-- Keep responses short & actionable.
-
-{{context}}
-"""
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", sys_prompt),
-        ("user", "{input}")
-    ])
-
-    llama_model = "gemma2-9b-it"  # or "gemma2-70b-chat", 
-    llm = ChatGroq(
-    model=llama_model,
-    groq_api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0.3
+    # D. The Prompt
+    system_prompt = (
+        "You are a Hyper-Personalized Retail Assistant for Groundtruth Store. "
+        "Use the following pieces of retrieved context to answer the question. "
+        "IMPORTANT: You must incorporate the user's REAL-TIME CONTEXT into your answer.\n\n"
+        
+        "USER CONTEXT:\n"
+        f"Name: {USER_CONTEXT['name']}\n"
+        f"Location: {USER_CONTEXT['current_location']['description']}\n"
+        f"Nearby Alerts: {alerts_str}\n"
+        f"Loyalty Tier: {USER_CONTEXT['loyalty_status']}\n"
+        f"History:\n{history_str}\n\n"
+        
+        "INSTRUCTIONS:\n"
+        "1. If the user mentions vague feelings (e.g., 'I'm cold', 'I'm hungry'), check their Location and Nearby Alerts to suggest a partner store (like Starbucks).\n"
+        "2. If the user asks about returns, check their Loyalty Tier. Gold members get 'No Questions Asked' returns.\n"
+        "3. Keep answers short, friendly, and actionable.\n\n"
+        
+        "{context}"
     )
 
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", "{input}"),
+    ])
 
-    chain = create_stuff_documents_chain(llm, prompt)
-    rag_chain = create_retrieval_chain(retriever, chain)
+    # E. LLM
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
+    
+    # F. Build Chain
+    question_answer_chain = create_stuff_documents_chain(llm, prompt)
+    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
-    return rag_chain, "OK"
+    return rag_chain, "Success"
 
+# --- 5. STREAMLIT UI ---
+st.set_page_config(page_title="Groundtruth AI Assistant", page_icon="🛍️")
+st.title("🛍️ Context-Aware Support Bot")
+st.markdown("### Powered by Gemini 1.5 & Location Intelligence")
 
-# -------- STREAMLIT UI --------
-st.title("🛍️ AI Retail Assistant — GROQ Edition")
+with st.expander("👁️ View Live Context Data (Backend)"):
+    st.json(USER_CONTEXT)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-query = st.chat_input("How can I help you today?")
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+prompt_text = st.chat_input("How can I help you today?")
 
-if query:
-    clean_q = mask_pii(query)
-    st.session_state.messages.append({"role": "user", "content": query})
+if prompt_text:
+    with st.chat_message("user"):
+        st.markdown(prompt_text)
+    st.session_state.messages.append({"role": "user", "content": prompt_text})
 
-    rag_chain, status = setup_rag_pipeline()
+    clean_text = mask_pii(prompt_text)
+    if clean_text != prompt_text:
+        st.toast("🛡️ Sensitive Data (PII) Auto-Redacted!", icon="🔒")
 
+    # Calling Version 5 (Throttled) Pipeline
+    rag_chain, status = setup_rag_pipeline_v5()
+    
     if rag_chain:
-        res = rag_chain.invoke({"input": clean_q})
-        answer = res["answer"]
-
-        st.session_state.messages.append({"role": "assistant", "content": answer})
-
-        with st.chat_message("assistant"):
-            st.markdown(answer)
+        with st.spinner("Analyzing location & policy data..."):
+            try:
+                response = rag_chain.invoke({"input": clean_text})
+                answer = response["answer"]
+                
+                with st.chat_message("assistant"):
+                    st.markdown(answer)
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+            except Exception as e:
+                st.error(f"API Error: {str(e)}")
     else:
         st.error(status)
