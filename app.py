@@ -120,10 +120,9 @@ def setup_rag_pipeline_v5():
 # --- 5. STREAMLIT UI ---
 st.set_page_config(page_title="Groundtruth AI Assistant", page_icon="🛍️")
 st.title("🛍️ Context-Aware Support Bot")
-st.markdown("### Powered by Gemini 1.5 & Location Intelligence")
+st.markdown("### Powered by Gemini 2.0 & Location Intelligence")
 
-with st.expander("👁️ View Live Context Data (Backend)"):
-    st.json(USER_CONTEXT)
+
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
