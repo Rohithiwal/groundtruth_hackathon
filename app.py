@@ -109,7 +109,7 @@ def setup_rag_pipeline_v5():
     ])
 
     # E. LLM
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp", temperature=0.3)
     
     # F. Build Chain
     question_answer_chain = create_stuff_documents_chain(llm, prompt)
